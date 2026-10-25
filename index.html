@@ -1,0 +1,1572 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>BAM vs Heijmans Market Monitor</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,500;6..72,600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/js/all.min.js"></script>
+
+<style>
+/* =====================================================================
+   DESIGN TOKENS
+   Layout concept: a trading-terminal grid. Summary first (executive
+   card + quotes), then the comparison chart as the centerpiece, then
+   analytics, visual breakdowns, insights and the news tape.
+   Dark is the default look (as requested). Light mode is an explicit
+   choice via the toggle, which sets data-theme="light" on <html>.
+   ===================================================================== */
+:root {
+  color-scheme: dark;
+  --bg:        #090E13;
+  --bg-2:      #0E151C;
+  --surface:   rgba(20, 29, 38, 0.62);
+  --surface-2: rgba(28, 39, 50, 0.72);
+  --line:      rgba(150, 176, 196, 0.14);
+  --line-2:    rgba(150, 176, 196, 0.24);
+  --fg:        #E7EDF1;
+  --muted:     #8B9BA8;
+  --faint:     #5F707D;
+  --bam:       #17B26A;   /* BAM green, lifted for dark ground */
+  --heij:      #F39223;   /* Heijmans orange */
+  --bench:     #8FA4BA;   /* AMX benchmark */
+  --pos:       #34C97E;
+  --neg:       #EF5A5F;
+  --warn:      #E7B341;
+  --shadow:    0 10px 40px rgba(0, 0, 0, 0.35);
+  --skel-a:    rgba(150, 176, 196, 0.08);
+  --skel-b:    rgba(150, 176, 196, 0.18);
+
+  --f-display: "Newsreader", "Georgia", "Times New Roman", serif;
+  --f-body:    "IBM Plex Sans", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --f-label:   "IBM Plex Sans Condensed", "Arial Narrow", "Segoe UI", sans-serif;
+  --f-mono:    "IBM Plex Mono", ui-monospace, "SFMono-Regular", Consolas, monospace;
+
+  --r-lg: 16px;
+  --r-md: 11px;
+  --r-sm: 7px;
+}
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg:        #EDF1F3;
+  --bg-2:      #E4EAEE;
+  --surface:   rgba(255, 255, 255, 0.72);
+  --surface-2: rgba(255, 255, 255, 0.9);
+  --line:      rgba(20, 44, 60, 0.11);
+  --line-2:    rgba(20, 44, 60, 0.2);
+  --fg:        #0E1B23;
+  --muted:     #566874;
+  --faint:     #84939D;
+  --bam:       #00843D;
+  --heij:      #D9700A;
+  --bench:     #5F7488;
+  --pos:       #0E8A4A;
+  --neg:       #C93139;
+  --warn:      #A87600;
+  --shadow:    0 10px 30px rgba(20, 44, 60, 0.10);
+  --skel-a:    rgba(20, 44, 60, 0.06);
+  --skel-b:    rgba(20, 44, 60, 0.13);
+}
+
+/* =====================================================================
+   BASE
+   ===================================================================== */
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { background: var(--bg); color: var(--fg); }
+body {
+  font-family: var(--f-body);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  min-height: 100%;
+}
+#bg-canvas { position: fixed; inset: 0; width: 100%; height: 100%; z-index: 0; pointer-events: none; }
+.wrap {
+  position: relative; z-index: 1;
+  max-width: 1320px; margin: 0 auto;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 20px 40px;
+  display: flex; flex-direction: column; gap: 18px;
+}
+h1, h2, h3 { margin: 0; text-wrap: balance; }
+p { margin: 0; }
+a { color: inherit; }
+button { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--bam); outline-offset: 2px; border-radius: 4px; }
+.num { font-family: var(--f-mono); font-variant-numeric: tabular-nums; }
+.label {
+  font-family: var(--f-label); font-weight: 600; font-size: 11px;
+  letter-spacing: 0.09em; text-transform: uppercase; color: var(--muted);
+}
+.c-bam  { color: var(--bam); }
+.c-heij { color: var(--heij); }
+.c-pos  { color: var(--pos); }
+.c-neg  { color: var(--neg); }
+
+/* Glass panel: the one surface treatment, used for every section */
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  backdrop-filter: blur(14px) saturate(130%);
+  -webkit-backdrop-filter: blur(14px) saturate(130%);
+  box-shadow: var(--shadow);
+  padding: 18px;
+  min-width: 0;
+}
+.panel-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+.panel-title { font-family: var(--f-display); font-weight: 600; font-size: 20px; letter-spacing: -0.01em; }
+.panel-sub { color: var(--muted); font-size: 12.5px; margin-top: 2px; }
+
+/* =====================================================================
+   HEADER
+   ===================================================================== */
+.top { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 16px; padding-block: 8px 4px; border-bottom: 1px solid var(--line); padding-bottom: 16px; }
+.brandline { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.ticker-dot { width: 8px; height: 8px; border-radius: 50%; }
+.title { font-family: var(--f-display); font-weight: 600; font-size: clamp(26px, 4vw, 40px); line-height: 1.08; letter-spacing: -0.02em; }
+.title .vs { font-style: italic; font-weight: 500; color: var(--muted); }
+.subtitle { color: var(--muted); margin-top: 6px; font-size: 15px; }
+.top-right { display: flex; flex-direction: column; align-items: flex-end; gap: 10px; }
+.clock { text-align: right; }
+.clock-time { font-family: var(--f-mono); font-size: 22px; font-variant-numeric: tabular-nums; }
+.clock-date { color: var(--muted); font-size: 12.5px; }
+.controls { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.btn {
+  display: inline-flex; align-items: center; gap: 8px;
+  height: 34px; padding: 0 12px;
+  border: 1px solid var(--line-2); border-radius: var(--r-sm);
+  background: var(--surface-2); cursor: pointer;
+  font-size: 12.5px; font-weight: 500;
+  transition: border-color .2s, transform .2s, background .2s;
+}
+.btn:hover { border-color: var(--bam); transform: translateY(-1px); }
+.status-pill {
+  display: inline-flex; align-items: center; gap: 8px;
+  height: 34px; padding: 0 12px; border-radius: 999px;
+  border: 1px solid var(--line-2); background: var(--surface-2);
+  font-size: 12px; color: var(--muted);
+}
+.status-pill .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--faint); }
+.status-pill.open .dot { background: var(--pos); box-shadow: 0 0 0 0 var(--pos); animation: pulse 2s infinite; }
+@keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(52,201,126,.6); } 70% { box-shadow: 0 0 0 7px rgba(52,201,126,0); } 100% { box-shadow: 0 0 0 0 rgba(52,201,126,0); } }
+.refresh-ring { width: 18px; height: 18px; }
+.refresh-ring circle { fill: none; stroke-width: 2.5; }
+.refresh-ring .track { stroke: var(--line-2); }
+.refresh-ring .prog { stroke: var(--bam); stroke-linecap: round; transform: rotate(-90deg); transform-origin: 50% 50%; transition: stroke-dashoffset 1s linear; }
+
+/* =====================================================================
+   EXECUTIVE SUMMARY
+   ===================================================================== */
+.exec { display: grid; grid-template-columns: 1.6fr 1fr; gap: 18px; align-items: stretch; }
+.exec-text { font-family: var(--f-display); font-size: clamp(17px, 2vw, 21px); line-height: 1.45; font-weight: 500; max-width: 62ch; }
+.exec-text b { font-weight: 600; }
+.exec-meta { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 10px; border-radius: 999px;
+  border: 1px solid var(--line-2); font-size: 12px; color: var(--muted);
+  background: var(--surface-2);
+}
+.verdict {
+  border-left: 1px solid var(--line); padding-left: 18px;
+  display: flex; flex-direction: column; justify-content: center; gap: 10px;
+}
+.verdict-name { font-family: var(--f-display); font-size: 30px; font-weight: 600; line-height: 1; }
+.badge-best {
+  align-self: flex-start;
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 5px 11px; border-radius: 999px;
+  font-family: var(--f-label); font-weight: 600; font-size: 11.5px; letter-spacing: .07em; text-transform: uppercase;
+  color: var(--bg); background: var(--bam);
+}
+
+/* =====================================================================
+   QUOTE CARDS
+   ===================================================================== */
+.quotes { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+.quote { position: relative; overflow: hidden; transition: transform .25s, border-color .25s; }
+.quote:hover { transform: translateY(-2px); border-color: var(--line-2); }
+.quote::after {
+  content: ""; position: absolute; inset: auto -40% -60% auto; width: 320px; height: 320px; border-radius: 50%;
+  background: radial-gradient(circle, var(--accent-glow) 0%, transparent 65%); opacity: .14; pointer-events: none;
+}
+.quote.bam  { --accent: var(--bam);  --accent-glow: var(--bam); }
+.quote.heij { --accent: var(--heij); --accent-glow: var(--heij); }
+.quote-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
+.co-btn {
+  background: none; border: 0; padding: 0; cursor: pointer; text-align: left;
+  display: flex; align-items: center; gap: 10px;
+}
+.co-mark {
+  width: 38px; height: 38px; border-radius: 9px; display: grid; place-items: center;
+  font-family: var(--f-label); font-weight: 600; font-size: 13px; letter-spacing: .02em;
+  color: var(--bg); background: var(--accent);
+}
+.co-name { font-weight: 600; font-size: 15px; display: flex; align-items: center; gap: 6px; }
+.co-name .fa-circle-info { color: var(--faint); font-size: 12px; transition: color .2s; }
+.co-btn:hover .fa-circle-info { color: var(--accent); }
+.co-tick { color: var(--muted); font-size: 12px; font-family: var(--f-mono); }
+.quote-time { color: var(--faint); font-size: 11.5px; text-align: right; }
+.price-row { display: flex; align-items: flex-end; gap: 14px; flex-wrap: wrap; margin-top: 14px; }
+.price { font-family: var(--f-mono); font-weight: 500; font-size: clamp(34px, 5vw, 48px); line-height: 1; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+.chg {
+  display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; border-radius: 7px;
+  font-family: var(--f-mono); font-size: 14px; font-variant-numeric: tabular-nums;
+}
+.chg.up   { color: var(--pos); background: color-mix(in srgb, var(--pos) 14%, transparent); }
+.chg.down { color: var(--neg); background: color-mix(in srgb, var(--neg) 14%, transparent); }
+.spark { height: 56px; margin-top: 12px; position: relative; }
+.facts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line); }
+.fact .v { font-family: var(--f-mono); font-size: 14px; margin-top: 2px; font-variant-numeric: tabular-nums; }
+
+.unavail { display: flex; gap: 12px; align-items: flex-start; margin-top: 18px; padding: 16px; border-radius: var(--r-md); border: 1px dashed var(--line-2); color: var(--muted); }
+.unavail i { font-size: 20px; margin-top: 2px; }
+.unavail strong { display: block; color: var(--fg); font-size: 15px; }
+.unavail span { font-size: 12.5px; }
+.data-status { font-size: 11.5px; color: var(--faint); margin-top: 2px; }
+.data-status.ok::before { content: ""; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--pos); margin-right: 6px; vertical-align: middle; }
+.data-status.bad { color: var(--neg); }
+.banner { display: flex; gap: 12px; align-items: flex-start; padding: 14px 16px; border-radius: var(--r-md); border: 1px solid color-mix(in srgb, var(--neg) 45%, transparent); background: color-mix(in srgb, var(--neg) 10%, var(--bg-2)); font-size: 13.5px; }
+.banner i { color: var(--neg); margin-top: 3px; }
+.chart-empty { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; color: var(--muted); font-size: 14px; }
+.chart-empty i { font-size: 24px; }
+
+/* =====================================================================
+   MAIN CHART
+   ===================================================================== */
+.seg { display: inline-flex; padding: 3px; border-radius: 9px; border: 1px solid var(--line-2); background: var(--surface-2); gap: 2px; flex-wrap: wrap; }
+.seg button {
+  border: 0; background: transparent; cursor: pointer;
+  padding: 6px 12px; border-radius: 7px; font-family: var(--f-mono); font-size: 12.5px; color: var(--muted);
+  transition: background .2s, color .2s;
+}
+.seg button:hover { color: var(--fg); }
+.seg button[aria-pressed="true"] { background: var(--fg); color: var(--bg); }
+.legend-row { display: flex; flex-wrap: wrap; gap: 22px; margin-bottom: 10px; }
+.legend-item { display: flex; align-items: baseline; gap: 8px; }
+.legend-swatch { width: 14px; height: 3px; border-radius: 2px; align-self: center; }
+.legend-val { font-family: var(--f-mono); font-size: 20px; font-variant-numeric: tabular-nums; }
+.chart-box { position: relative; height: 340px; }
+
+/* =====================================================================
+   ANALYTICS TILES
+   ===================================================================== */
+.tiles { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 14px; }
+.tile { padding: 16px; transition: transform .25s, border-color .25s; }
+.tile:hover { transform: translateY(-2px); border-color: var(--line-2); }
+.tile .big { font-family: var(--f-mono); font-size: 26px; margin-top: 8px; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.tile .note { color: var(--muted); font-size: 12px; margin-top: 6px; }
+.pair { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+.pair-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 13px; }
+.pair-row .num { font-size: 15px; }
+.bar { height: 4px; border-radius: 3px; background: var(--line); overflow: hidden; margin-top: 3px; }
+.bar > i { display: block; height: 100%; border-radius: 3px; transition: width .8s cubic-bezier(.2,.8,.2,1); }
+.trend-pill { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 500; }
+
+/* =====================================================================
+   VISUAL BREAKDOWNS
+   ===================================================================== */
+.viz { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; }
+.gauge-box { position: relative; height: 180px; }
+.gauge-center { position: absolute; left: 0; right: 0; bottom: 6px; text-align: center; }
+.gauge-center .num { font-size: 26px; }
+.gauge-ends { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); margin-top: 6px; }
+.donut-box { position: relative; height: 200px; }
+.donut-center { position: absolute; inset: 0; display: grid; place-items: center; text-align: center; pointer-events: none; }
+.donut-center .num { font-size: 20px; }
+.bench-box { position: relative; height: 200px; }
+.mini-seg { margin-top: 2px; }
+.mini-seg button { padding: 4px 9px; font-size: 11.5px; }
+
+/* =====================================================================
+   INSIGHTS + NEWS
+   ===================================================================== */
+.split { display: grid; grid-template-columns: 1fr 1.35fr; gap: 18px; align-items: start; }
+.insights { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.insight { display: grid; grid-template-columns: 30px 1fr; gap: 12px; padding: 12px 0; border-top: 1px solid var(--line); }
+.insight:first-child { border-top: 0; padding-top: 2px; }
+.insight-ico { width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center; background: var(--surface-2); border: 1px solid var(--line); color: var(--muted); font-size: 13px; }
+.insight h3 { font-size: 14px; font-weight: 600; margin-bottom: 3px; }
+.insight p { color: var(--muted); font-size: 13.5px; max-width: 62ch; }
+.news-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.news {
+  display: flex; flex-direction: column; gap: 8px;
+  padding: 14px; border-radius: var(--r-md);
+  background: var(--surface-2); border: 1px solid var(--line);
+  text-decoration: none; transition: transform .25s, border-color .25s, box-shadow .25s;
+  min-width: 0;
+}
+.news:hover { transform: translateY(-3px); border-color: var(--tag); box-shadow: var(--shadow); }
+.news.bam  { --tag: var(--bam); }
+.news.heij { --tag: var(--heij); }
+.news-meta { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.tag {
+  font-family: var(--f-label); font-weight: 600; font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase;
+  padding: 3px 8px; border-radius: 5px; color: var(--tag); border: 1px solid color-mix(in srgb, var(--tag) 45%, transparent);
+}
+.news-date { color: var(--faint); font-size: 12px; font-family: var(--f-mono); }
+.news h3 { font-family: var(--f-display); font-size: 17px; font-weight: 600; line-height: 1.25; }
+.news p { color: var(--muted); font-size: 13px; }
+.news-src { margin-top: auto; color: var(--faint); font-size: 11.5px; display: flex; align-items: center; gap: 6px; }
+
+.foot { color: var(--faint); font-size: 12px; line-height: 1.6; border-top: 1px solid var(--line); padding-top: 14px; }
+.foot a { color: var(--muted); }
+
+/* =====================================================================
+   MODAL
+   ===================================================================== */
+.modal-backdrop {
+  position: fixed; inset: 0; z-index: 50; display: grid; place-items: center;
+  background: rgba(4, 8, 12, 0.6); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+  padding: max(16px, env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-right, 0px)) max(16px, env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px));
+  animation: fade .2s ease;
+}
+.modal { width: min(560px, 100%); max-height: 88vh; overflow: auto; background: var(--bg-2); animation: rise .25s cubic-bezier(.2,.8,.2,1); }
+.modal-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 14px; }
+.modal dl { display: grid; grid-template-columns: 140px 1fr; gap: 9px 14px; margin: 0; }
+.modal dt { color: var(--muted); font-size: 12.5px; }
+.modal dd { margin: 0; font-size: 13.5px; }
+.modal .lede { color: var(--muted); margin-bottom: 14px; }
+.x-btn { width: 34px; height: 34px; border-radius: 8px; border: 1px solid var(--line-2); background: transparent; cursor: pointer; }
+@keyframes fade { from { opacity: 0; } }
+@keyframes rise { from { opacity: 0; transform: translateY(12px); } }
+
+/* =====================================================================
+   LOADING SKELETONS
+   While <html> has .is-loading, every [data-skel] element shows a
+   shimmer bar instead of its content.
+   ===================================================================== */
+.is-loading [data-skel] {
+  color: transparent !important; position: relative; border-radius: 6px;
+  background: linear-gradient(90deg, var(--skel-a) 25%, var(--skel-b) 50%, var(--skel-a) 75%);
+  background-size: 200% 100%; animation: shimmer 1.2s infinite;
+}
+.is-loading [data-skel] * { visibility: hidden; }
+@keyframes shimmer { to { background-position: -200% 0; } }
+
+/* Entrance: content stays visible at rest; only a short lift */
+.reveal { animation: lift .6s cubic-bezier(.2,.8,.2,1) both; }
+@keyframes lift { from { transform: translateY(8px); } }
+
+/* =====================================================================
+   RESPONSIVE
+   ===================================================================== */
+@media (max-width: 1100px) {
+  .tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .viz { grid-template-columns: 1fr 1fr; }
+  .viz > :last-child { grid-column: 1 / -1; }
+}
+@media (max-width: 860px) {
+  .exec, .quotes, .split { grid-template-columns: 1fr; }
+  .verdict { border-left: 0; border-top: 1px solid var(--line); padding-left: 0; padding-top: 14px; }
+  .news-grid { grid-template-columns: 1fr; }
+  .tiles { grid-template-columns: 1fr 1fr; }
+}
+@media (max-width: 560px) {
+  .top-right { align-items: flex-start; }
+  .clock { text-align: left; }
+  .controls { justify-content: flex-start; }
+  .facts { grid-template-columns: 1fr 1fr; }
+  .tiles { grid-template-columns: 1fr; }
+  .viz { grid-template-columns: 1fr; }
+  .chart-box { height: 260px; }
+  .modal dl { grid-template-columns: 1fr; gap: 2px 0; }
+  .modal dd { margin-bottom: 8px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}
+@media print {
+  #bg-canvas, .controls, .seg, .mini-seg { display: none !important; }
+  .panel { box-shadow: none; backdrop-filter: none; break-inside: avoid; }
+}
+</style>
+
+<canvas id="bg-canvas" aria-hidden="true"></canvas>
+
+<div class="wrap">
+
+  <!-- ============================ HEADER ============================ -->
+  <header class="top">
+    <div>
+      <div class="brandline">
+        <span class="ticker-dot" style="background:var(--bam)"></span>
+        <span class="label">BAMNB</span>
+        <span class="ticker-dot" style="background:var(--heij)"></span>
+        <span class="label">HEIJM</span>
+        <span class="label" style="color:var(--faint)">Euronext Amsterdam</span>
+      </div>
+      <h1 class="title">BAM <span class="vs">vs</span> Heijmans - Market Performance Dashboard</h1>
+      <p class="subtitle">Real-time comparison of Dutch construction leaders</p>
+    </div>
+    <div class="top-right">
+      <div class="clock" aria-live="off">
+        <div class="clock-time" id="clock-time">--:--:--</div>
+        <div class="clock-date" id="clock-date">&nbsp;</div>
+        <div class="data-status" id="data-status">Connecting to Yahoo Finance</div>
+      </div>
+      <div class="controls">
+        <span class="status-pill" id="mkt-status"><span class="dot"></span><span id="mkt-text">Checking market</span></span>
+        <button class="btn" id="refresh-btn" type="button" title="Refresh now">
+          <svg class="refresh-ring" viewBox="0 0 20 20" aria-hidden="true"><circle class="track" cx="10" cy="10" r="7.5"></circle><circle class="prog" id="ring" cx="10" cy="10" r="7.5"></circle></svg>
+          <span id="refresh-label">60s</span>
+        </button>
+        <button class="btn" id="theme-btn" type="button" aria-label="Switch to light mode"><i class="fa-solid fa-sun"></i><span id="theme-label">Light</span></button>
+        <button class="btn" id="pdf-btn" type="button" hidden><i class="fa-solid fa-file-pdf"></i>Export PDF</button>
+      </div>
+    </div>
+  </header>
+
+  <div class="banner" id="data-banner" role="status" hidden>
+    <i class="fa-solid fa-triangle-exclamation"></i>
+    <div><strong>Live data unavailable.</strong> <span id="banner-text"></span></div>
+  </div>
+
+  <!-- ======================= EXECUTIVE SUMMARY ======================= -->
+  <section class="panel exec reveal" aria-labelledby="exec-h">
+    <div>
+      <div class="label" id="exec-h" style="margin-bottom:10px"><i class="fa-solid fa-briefcase"></i>&nbsp; Executive summary</div>
+      <p class="exec-text" id="exec-text" data-skel>Connecting to Yahoo Finance for live BAM and Heijmans quotes.</p>
+      <div class="exec-meta" id="exec-meta"></div>
+    </div>
+    <div class="verdict">
+      <span class="label">Best performer, <span id="verdict-period">1 year</span></span>
+      <div class="verdict-name" id="verdict-name" data-skel>n/a</div>
+      <span class="badge-best" id="verdict-badge"><i class="fa-solid fa-trophy"></i><span id="verdict-badge-text">Leader</span></span>
+      <div class="panel-sub" id="verdict-note" data-skel>&nbsp;</div>
+    </div>
+  </section>
+
+  <!-- ========================== QUOTE CARDS ========================== -->
+  <section class="quotes" aria-label="Share prices">
+    <article class="panel quote bam reveal" id="q-bam"></article>
+    <article class="panel quote heij reveal" id="q-heij"></article>
+  </section>
+
+  <!-- ======================= COMPARISON CHART ======================= -->
+  <section class="panel reveal" aria-labelledby="cmp-h">
+    <div class="panel-head">
+      <div>
+        <h2 class="panel-title" id="cmp-h">Share price performance</h2>
+        <p class="panel-sub">Rebased to 0% at the start of the selected period</p>
+      </div>
+      <div class="seg" role="group" aria-label="Period" id="period-seg">
+        <button type="button" data-p="1M" aria-pressed="false">1M</button>
+        <button type="button" data-p="3M" aria-pressed="false">3M</button>
+        <button type="button" data-p="6M" aria-pressed="false">6M</button>
+        <button type="button" data-p="1Y" aria-pressed="true">1Y</button>
+        <button type="button" data-p="5Y" aria-pressed="false">5Y</button>
+      </div>
+    </div>
+    <div class="legend-row">
+      <div class="legend-item"><span class="legend-swatch" style="background:var(--bam)"></span><span class="label">BAM</span><span class="legend-val" id="lg-bam" data-skel>+0.0%</span></div>
+      <div class="legend-item"><span class="legend-swatch" style="background:var(--heij)"></span><span class="label">Heijmans</span><span class="legend-val" id="lg-heij" data-skel>+0.0%</span></div>
+      <div class="legend-item"><span class="legend-swatch" style="background:var(--bench); height:2px"></span><span class="label">AEX index</span><span class="legend-val" id="lg-idx" style="font-size:15px;color:var(--muted)" data-skel>+0.0%</span></div>
+    </div>
+    <div class="chart-box"><canvas id="main-chart" aria-label="Rebased share price performance of BAM and Heijmans"></canvas><div class="chart-empty" id="chart-empty" hidden><i class="fa-solid fa-plug-circle-xmark"></i><span>Data unavailable</span></div></div>
+  </section>
+
+  <!-- ===================== PERFORMANCE ANALYTICS ===================== -->
+  <section class="tiles" aria-label="Performance analytics">
+    <div class="panel tile reveal">
+      <div class="label"><i class="fa-solid fa-scale-unbalanced"></i>&nbsp; Relative outperformance</div>
+      <div class="big" id="t-rel" data-skel>+0.0 pp</div>
+      <div class="note" id="t-rel-note" data-skel>&nbsp;</div>
+    </div>
+    <div class="panel tile reveal">
+      <div class="label"><i class="fa-solid fa-chart-line"></i>&nbsp; Price return</div>
+      <div class="pair" id="t-ret"></div>
+    </div>
+    <div class="panel tile reveal">
+      <div class="label"><i class="fa-solid fa-wave-square"></i>&nbsp; Volatility (ann.)</div>
+      <div class="pair" id="t-vol"></div>
+    </div>
+    <div class="panel tile reveal">
+      <div class="label"><i class="fa-solid fa-compass"></i>&nbsp; Trend direction</div>
+      <div class="pair" id="t-trend"></div>
+    </div>
+    <div class="panel tile reveal">
+      <div class="label"><i class="fa-solid fa-medal"></i>&nbsp; Best performer</div>
+      <div class="big" id="t-best" data-skel>n/a</div>
+      <div class="note" id="t-best-note" data-skel>&nbsp;</div>
+    </div>
+  </section>
+
+  <!-- ===================== VISUAL BREAKDOWNS ===================== -->
+  <section class="viz" aria-label="Visual comparisons">
+    <div class="panel reveal">
+      <div class="panel-head" style="margin-bottom:6px">
+        <div><h2 class="panel-title">Performance gauge</h2><p class="panel-sub">Who leads over the selected period</p></div>
+      </div>
+      <div class="gauge-box">
+        <canvas id="gauge-chart" aria-label="Relative performance gauge"></canvas>
+        <div class="gauge-center"><div class="num" id="gauge-val">0 pp</div><div class="panel-sub" id="gauge-lbl">&nbsp;</div></div>
+      </div>
+      <div class="gauge-ends"><span class="c-heij">Heijmans leads</span><span class="c-bam">BAM leads</span></div>
+    </div>
+    <div class="panel reveal">
+      <div class="panel-head" style="margin-bottom:6px">
+        <div><h2 class="panel-title">Relative scale</h2><p class="panel-sub">Share of combined BAM + Heijmans</p></div>
+        <div class="seg mini-seg" role="group" aria-label="Scale metric" id="scale-seg">
+          <button type="button" data-m="rev" aria-pressed="true">Revenue H1</button>
+          <button type="button" data-m="ob" aria-pressed="false">Order book</button>
+          <button type="button" data-m="mc" aria-pressed="false">Mkt cap</button>
+        </div>
+      </div>
+      <div class="donut-box">
+        <canvas id="donut-chart" aria-label="Share of combined scale"></canvas>
+        <div class="donut-center"><div><div class="num" id="donut-total">€0</div><div class="panel-sub" id="donut-sub">combined</div></div></div>
+      </div>
+    </div>
+    <div class="panel reveal">
+      <div class="panel-head" style="margin-bottom:6px">
+        <div><h2 class="panel-title">Benchmark comparison</h2><p class="panel-sub" id="bench-sub">Price return vs AEX index</p></div>
+      </div>
+      <div class="bench-box"><canvas id="bench-chart" aria-label="Return versus benchmark"></canvas></div>
+    </div>
+  </section>
+
+  <!-- ======================= INSIGHTS + NEWS ======================= -->
+  <section class="split">
+    <div class="panel reveal" aria-labelledby="ins-h">
+      <div class="panel-head">
+        <div><h2 class="panel-title" id="ins-h">Insights</h2><p class="panel-sub">Generated from the figures on this page</p></div>
+        <span class="chip"><i class="fa-solid fa-wand-magic-sparkles"></i>Auto-generated</span>
+      </div>
+      <ul class="insights" id="insights"></ul>
+    </div>
+    <div class="panel reveal" aria-labelledby="news-h">
+      <div class="panel-head">
+        <div><h2 class="panel-title" id="news-h">News feed</h2><p class="panel-sub" id="news-sub">Live headlines from Google News</p></div>
+        <div class="seg mini-seg" role="group" aria-label="Filter news" id="news-seg">
+          <button type="button" data-f="all" aria-pressed="true">All</button>
+          <button type="button" data-f="bam" aria-pressed="false">BAM</button>
+          <button type="button" data-f="heij" aria-pressed="false">Heijmans</button>
+        </div>
+      </div>
+      <div class="news-grid" id="news-grid"></div>
+    </div>
+  </section>
+
+  <footer class="foot" id="foot">
+    <strong>Data notes.</strong> All share prices, volumes, ranges and price history load live from Yahoo Finance (BAMNB.AS, HEIJM.AS, ^AEX), fetched by the included server.py on the same device (or, as a fallback, a public CORS proxy), which passes the data on unchanged. Exchange data may be delayed by about 15 minutes. If Yahoo cannot be reached, prices show as unavailable; no stored or modelled prices are used. Market caps are estimates: live price × shares in issue (BAM about 253m, Heijmans about 27.5m). Headlines load live from the Google News RSS feed and are refreshed every 10 minutes; if the feed cannot be reached, no news is shown. Revenue, order book and margin figures come from the H1 2026 reports. Returns exclude dividends. On GitHub Pages, a scheduled job fetches the same data every 15 minutes during Euronext hours and the page shows when it was last updated. Live data only loads when this file is opened directly in a browser, through server.py, or on GitHub Pages. Not investment advice.
+  </footer>
+</div>
+
+<div id="modal-root"></div>
+
+<script>
+/* =========================================================================
+   ARCHITECTURE OVERVIEW
+   -------------------------------------------------------------------------
+   Every share price on this page comes live from Yahoo Finance. Nothing is
+   modelled, simulated or hard-coded. If Yahoo cannot be reached, the page
+   says "Data unavailable" instead of showing numbers.
+
+   1. CONFIG     Symbols, proxy list, reported company facts, news feeds.
+   2b. News      Google News RSS per company, via the same proxies.
+   2. Live       Fetches Yahoo's chart endpoint (daily bars + quote meta).
+                 Browsers block Yahoo's responses for pages on other sites
+                 (CORS), so each request goes through a public CORS proxy.
+                 The proxy only relays Yahoo's JSON; it does not alter it.
+                 Proxies are tried in order until one answers.
+   3. Analytics  Pure functions: returns, volatility, trend, quotes.
+   4. Format     Number / date / currency helpers.
+   5. Anim       Animated counters.
+   6. Charts     Chart.js instances, theme-aware colours.
+   7. Render     Writes the DOM. Every view handles the "no data" case.
+   8. UI         Clock, market status, 60 s refresh, theme, modal, PDF,
+                 animated background.
+   9. Boot       Loads 5 years of daily history, then refreshes the last
+                 few days every 60 seconds.
+
+   Important: live data only loads when this file is opened directly in a
+   browser. The published claude.ai page blocks all outside requests.
+   ========================================================================= */
+
+/* ============================== 1. CONFIG =============================== */
+const CONFIG = {
+  refreshSeconds: 60,
+  tz: 'Europe/Amsterdam',
+  symbols: { bam: 'BAMNB.AS', heij: 'HEIJM.AS', idx: '^AEX' },
+  idxName: 'AEX',
+  yahoo: 'https://query1.finance.yahoo.com/v8/finance/chart/',
+  // Public CORS proxies, tried in order. Each just forwards Yahoo's reply.
+  // `unwrap` turns a proxy's reply back into Yahoo's original JSON.
+  proxies: [
+    // Own server first: server.py fetches the data on this device, so no
+    // third party sits in between. Falls through when it is not running.
+    { name: 'local server', wrap: u => '/proxy?url=' + encodeURIComponent(u) },
+    { name: 'corsproxy.io',   wrap: u => 'https://corsproxy.io/?url=' + encodeURIComponent(u) },
+    { name: 'allorigins',     wrap: u => 'https://api.allorigins.win/get?url=' + encodeURIComponent(u), unwrap: j => JSON.parse(j.contents) },
+    { name: 'cors.lol',       wrap: u => 'https://api.cors.lol/?url=' + encodeURIComponent(u) },
+    { name: 'allorigins raw', wrap: u => 'https://api.allorigins.win/raw?url=' + encodeURIComponent(u) },
+    { name: 'codetabs',       wrap: u => 'https://api.codetabs.com/v1/proxy/?quest=' + encodeURIComponent(u) }
+  ],
+  // Calendar months back from the latest date, the convention brokers use
+  periods: { '1M': 1, '3M': 3, '6M': 6, '1Y': 12, '5Y': 60 },
+  periodNames: { '1M': '1 month', '3M': '3 months', '6M': '6 months', '1Y': '1 year', '5Y': '5 years' },
+
+  // Shares in issue from company / market sources, used only to estimate
+  // market cap from the live price (Yahoo's chart feed has no market cap).
+  shares: { bam: 253e6, heij: 27.48e6 },
+
+  // Reported H1 2026 figures (EUR millions) from the half-year reports
+  fundamentals: {
+    bam:  { revH1: 3494, orderBook: 12600, ebitdaMargin: 6.9 },
+    heij: { revH1: 1517, orderBook: 4100,  ebitdaMargin: 9.0 }
+  },
+
+  companies: {
+    bam: {
+      name: 'Koninklijke BAM Groep', short: 'BAM', ticker: 'BAMNB', mark: 'BAM',
+      lede: 'One of the largest construction groups in Europe, active in the Netherlands and in the UK and Ireland, across construction, civil engineering, property development and PPP.',
+      facts: [
+        ['Headquarters', 'Bunnik, the Netherlands'], ['Founded', '1869'], ['CEO', 'Ruud Joosten'],
+        ['Listing', 'Euronext Amsterdam (AMX)'], ['ISIN', 'NL0000337319'],
+        ['H1 2026 revenue', '€3,494 million (+3%)'], ['H1 2026 adj. EBITDA', '€240 million, 6.9% margin'],
+        ['Order book', '€12.6 billion'], ['2026 guidance', 'Adj. EBITDA margin of at least 6.5%'],
+        ['Next event', 'Trading update, 5 November 2026']
+      ]
+    },
+    heij: {
+      name: 'Koninklijke Heijmans', short: 'Heijmans', ticker: 'HEIJM', mark: 'HEI',
+      lede: 'Dutch listed company combining property development, residential construction, non-residential and infrastructure, with a strong position in sustainable housing and energy transition work.',
+      facts: [
+        ['Headquarters', 'Rosmalen, the Netherlands'], ['Founded', '1923'], ['CEO', 'Ton Hillen'],
+        ['Listing', 'Euronext Amsterdam'], ['ISIN', 'NL0009269109'],
+        ['H1 2026 revenue', '€1,517 million (+16%)'], ['H1 2026 underl. EBITDA', '€136 million, 9.0% margin'],
+        ['Order book', '€4.1 billion'], ['2026 outlook', 'Revenue about €3.1bn, underl. EBIT margin toward 7.3%'],
+        ['2030 ambition', 'Revenue about €4bn, EBIT margin 8 to 10%']
+      ]
+    }
+  },
+
+  // Live news: Google News RSS search per company (Dutch edition).
+  // Headlines are filtered on the company name to drop unrelated hits.
+  newsFeeds: {
+    bam:  { q: '"Koninklijke BAM" OR "BAM Groep" OR "bouwer BAM" OR "bouwbedrijf BAM"', match: /\bBAM\b/ },
+    heij: { q: 'Heijmans', match: /Heijmans/i }
+  },
+  // GitHub version: a scheduled job writes all data to this file
+  snapshotFile: 'data/data.json',
+  newsEveryMs: 10 * 60 * 1000,   // refresh headlines every 10 minutes
+  newsMaxAgeDays: 60
+};
+
+/* ============================== 2. LIVE DATA ============================ */
+const Live = (() => {
+  let preferred = 0;   // index of the proxy that answered last time
+  const amsDate = ms => new Date(ms).toLocaleDateString('en-CA', { timeZone: CONFIG.tz });
+
+  // Is the page served by server.py? null = not known yet.
+  const onLocalhost = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname);
+  let localMode = onLocalhost ? null : false;
+  const isLocal = () => localMode === true;
+
+  // One request through the proxy chain. `read` turns a response into the
+  // wanted value or throws. When server.py answers, its answer is final:
+  // no slow detours through public proxies.
+  async function viaProxies(url, read) {
+    const n = CONFIG.proxies.length, errs = [];
+    let localRefused = false;   // server.py ran but Yahoo refused it (e.g. 429)
+    for (let k = 0; k < n; k++) {
+      const i = (preferred + k) % n, p = CONFIG.proxies[i], local = p.name === 'local server';
+      if (local && localMode === false) continue;
+      if (!local && localMode === true && !localRefused) continue;
+      const ctrl = new AbortController(), timer = setTimeout(() => ctrl.abort(), local ? 20000 : 8000);
+      try {
+        const r = await fetch(p.wrap(url), { signal: ctrl.signal, cache: 'no-store' });
+        if (local) {
+          if (r.status === 404) { localMode = false; throw new Error('not running (started with http.server?)'); }
+          localMode = true;
+        }
+        if (!r.ok) throw new Error(`HTTP ${r.status}${r.statusText ? ' ' + r.statusText : ''}`);
+        const value = await read(r, p);
+        if (!local && localMode !== true) preferred = i;
+        return { value, via: p.name };
+      } catch (e) {
+        errs.push(`${p.name}: ${e.name === 'AbortError' ? 'timed out' : e.name === 'TypeError' ? 'blocked or offline' : e.message}`);
+        if (local && localMode === true) {
+          // Yahoo refusing this computer: try the public proxies once, they use other addresses
+          if (/HTTP (429|401|403|5\d\d)/.test(e.message)) localRefused = true;
+          else break;
+        }
+      } finally { clearTimeout(timer); }
+    }
+    throw new Error(errs.join(' · ') || 'No proxy reachable');
+  }
+
+  async function getJson(url) {
+    const { value, via } = await viaProxies(url, async (r, p) => {
+      let j = await r.json();
+      if (p.unwrap) j = p.unwrap(j);
+      const res = j && j.chart && j.chart.result && j.chart.result[0];
+      if (!res) throw new Error((j && j.chart && j.chart.error && j.chart.error.description) || 'Yahoo returned no data');
+      return res;
+    });
+    return { res: value, via };
+  }
+
+  // Same chain, for text responses such as RSS feeds
+  async function getText(url) {
+    const { value, via } = await viaProxies(url, async (r, p) => {
+      const body = p.unwrap ? (await r.json()).contents : await r.text();
+      if (!body || body.indexOf('<item') < 0 && body.indexOf('<rss') < 0) throw new Error('not a news feed');
+      return body;
+    });
+    return { body: value, via };
+  }
+
+  // Yahoo chart JSON -> { dates[], closes[], meta }. Duplicate dates keep the latest bar.
+  function parse(res) {
+    const ts = res.timestamp || [];
+    const q = (res.indicators && res.indicators.quote && res.indicators.quote[0]) || {};
+    const dates = [], closes = [];
+    ts.forEach((t, i) => {
+      const c = q.close ? q.close[i] : null;
+      if (c == null || !isFinite(c)) return;
+      const d = amsDate(t * 1000);
+      if (dates.length && dates[dates.length - 1] === d) closes[closes.length - 1] = c;
+      else { dates.push(d); closes.push(c); }
+    });
+    return { dates, closes, meta: res.meta || {} };
+  }
+
+  async function chart(symbol, range) {
+    const url = `${CONFIG.yahoo}${encodeURIComponent(symbol)}?range=${range}&interval=1d&includePrePost=false&events=div`;
+    const { res, via } = await getJson(url);
+    const out = parse(res);
+    if (!out.closes.length) throw new Error('Yahoo returned an empty price series');
+    return { ...out, via };
+  }
+
+  // Merge a short refresh (5 days) into the stored 5-year series
+  function merge(series, fresh) {
+    fresh.dates.forEach((d, i) => {
+      const at = series.dates.lastIndexOf(d);
+      if (at >= 0) series.closes[at] = fresh.closes[i];
+      else if (d > series.dates[series.dates.length - 1]) { series.dates.push(d); series.closes.push(fresh.closes[i]); }
+    });
+    series.meta = fresh.meta;
+    series.via = fresh.via;
+    return series;
+  }
+
+  return { chart, merge, amsDate, getText, isLocal, parse };
+})();
+
+/* ============================== 2b. NEWS ================================ */
+const News = (() => {
+  const feedUrl = q => `https://news.google.com/rss/search?q=${encodeURIComponent(q)}&hl=nl&gl=NL&ceid=NL:nl`;
+
+  // RSS XML -> [{ co, title, source, link, time }]. DOMParser never runs scripts.
+  function parse(xml, co) {
+    const doc = new DOMParser().parseFromString(xml, 'text/xml');
+    if (doc.querySelector('parsererror')) throw new Error('feed could not be read');
+    const cfg = CONFIG.newsFeeds[co], cutoff = Date.now() - CONFIG.newsMaxAgeDays * 864e5;
+    const seen = new Set(), out = [];
+    doc.querySelectorAll('item').forEach(it => {
+      const get = sel => ((it.querySelector(sel) || {}).textContent || '').trim();
+      const source = get('source');
+      let title = get('title');
+      if (source && title.endsWith(' - ' + source)) title = title.slice(0, -(source.length + 3));
+      const time = Date.parse(get('pubDate'));
+      const link = get('link');
+      const key = title.toLowerCase();
+      if (!title || !cfg.match.test(title) || seen.has(key) || !isFinite(time) || time < cutoff) return;
+      seen.add(key);
+      out.push({ co, title, source, time, link: /^https:\/\//.test(link) ? link : null });
+    });
+    return out.sort((a, b) => b.time - a.time).slice(0, 8);
+  }
+
+  async function load(co) {
+    const { body } = await Live.getText(feedUrl(CONFIG.newsFeeds[co].q));
+    return parse(body, co);
+  }
+  return { load };
+})();
+
+/* ============================== 2c. SNAPSHOT ============================ */
+// On GitHub Pages there is no server.py. A scheduled GitHub Action fetches
+// Yahoo Finance and Google News every 15 minutes and saves data/data.json
+// next to this page. The dashboard reads that file from its own site.
+const Snapshot = (() => {
+  const host = location.hostname;
+  const enabled = /^https?:$/.test(location.protocol) && !/^(localhost|127\.0\.0\.1|\[::1\])$/.test(host);
+  const required = /\.github\.io$/.test(host);   // no useful fallback there
+  async function load() {
+    const ctrl = new AbortController(), timer = setTimeout(() => ctrl.abort(), 8000);
+    try {
+      const r = await fetch(CONFIG.snapshotFile + '?t=' + Date.now(), { cache: 'no-store', signal: ctrl.signal });
+      if (!r.ok) return null;
+      const j = await r.json();
+      return j && j.charts ? j : null;
+    } catch (e) { return null; }
+    finally { clearTimeout(timer); }
+  }
+  // Only well-formed items get through; links must be https
+  function cleanNews(list, co) {
+    if (!Array.isArray(list)) return null;
+    return list.filter(n => n && typeof n.title === 'string' && isFinite(n.time)).slice(0, 8).map(n => ({
+      co, title: n.title, source: typeof n.source === 'string' ? n.source : '',
+      time: Number(n.time), link: typeof n.link === 'string' && /^https:\/\//.test(n.link) ? n.link : null
+    }));
+  }
+  return { enabled, required, load, cleanNews };
+})();
+
+/* ============================== 3. ANALYTICS ============================ */
+const Analytics = {
+  window(arr, n) { return n === Infinity ? arr.slice() : arr.slice(Math.max(0, arr.length - n - 1)); },
+  clean: arr => arr.filter(v => v != null && isFinite(v)),
+  rebase(arr) {
+    const base = arr.find(v => v != null);
+    return arr.map(v => (v == null || base == null ? null : (v / base - 1) * 100));
+  },
+  totalReturn(arr) {
+    const c = Analytics.clean(arr);
+    return c.length < 2 ? null : (c[c.length - 1] / c[0] - 1) * 100;
+  },
+  volatility(arr) {
+    const c = Analytics.clean(arr), r = [];
+    for (let i = 1; i < c.length; i++) r.push(Math.log(c[i] / c[i - 1]));
+    if (r.length < 5) return null;
+    const m = r.reduce((s, x) => s + x, 0) / r.length;
+    const v = r.reduce((s, x) => s + (x - m) ** 2, 0) / (r.length - 1);
+    return Math.sqrt(v) * Math.sqrt(252) * 100;
+  },
+  trend(closes) {
+    const c = Analytics.clean(closes);
+    if (c.length < 50) return null;
+    const last = c[c.length - 1], ma = a => a.reduce((s, x) => s + x, 0) / a.length;
+    const ma20 = ma(c.slice(-20)), ma50 = ma(c.slice(-50));
+    const slope = (last / c[c.length - 21] - 1) * 100;
+    let dir = 'Sideways', icon = 'fa-arrow-right', cls = '';
+    if (last > ma50 && slope > 1.5) { dir = 'Uptrend'; icon = 'fa-arrow-trend-up'; cls = 'c-pos'; }
+    else if (last < ma50 && slope < -1.5) { dir = 'Downtrend'; icon = 'fa-arrow-trend-down'; cls = 'c-neg'; }
+    else if (last < ma20 && last > ma50) { dir = 'Pullback in uptrend'; icon = 'fa-arrow-turn-down'; }
+    return { dir, icon, cls, vsMa50: (last / ma50 - 1) * 100, slope };
+  },
+  volScore(vol) {
+    const s = Math.max(1, Math.min(10, Math.round(((vol - 15) / 40) * 9 + 1)));
+    return { s, band: s <= 3 ? 'Low' : s <= 6 ? 'Moderate' : 'High' };
+  },
+  // Quote from Yahoo meta; previous close = last daily close before the quote's date
+  quote(s) {
+    if (!s) return null;
+    const m = s.meta, price = m.regularMarketPrice != null ? m.regularMarketPrice : s.closes[s.closes.length - 1];
+    const time = m.regularMarketTime ? m.regularMarketTime * 1000 : null;
+    const qd = time ? Live.amsDate(time) : s.dates[s.dates.length - 1];
+    let prev = null;
+    for (let i = s.dates.length - 1; i >= 0; i--) if (s.dates[i] < qd) { prev = s.closes[i]; break; }
+    const last = s.closes.slice(-252);
+    return {
+      price, prevClose: prev, time,
+      chg: prev ? (price / prev - 1) * 100 : null,
+      volume: m.regularMarketVolume != null ? m.regularMarketVolume : null,
+      dayHigh: m.regularMarketDayHigh != null ? m.regularMarketDayHigh : null,
+      dayLow: m.regularMarketDayLow != null ? m.regularMarketDayLow : null,
+      hi52: m.fiftyTwoWeekHigh != null ? m.fiftyTwoWeekHigh : Math.max(...last),
+      lo52: m.fiftyTwoWeekLow != null ? m.fiftyTwoWeekLow : Math.min(...last)
+    };
+  }
+};
+
+/* ============================== 4. FORMAT =============================== */
+const Fmt = {
+  eur: (v, d = 2) => v == null ? 'n/a' : '€' + v.toLocaleString('en-GB', { minimumFractionDigits: d, maximumFractionDigits: d }),
+  pct: (v, d = 1) => v == null ? 'n/a' : (v >= 0 ? '+' : '−') + Math.abs(v).toFixed(d) + '%',
+  pp:  (v, d = 1) => v == null ? 'n/a' : (v >= 0 ? '+' : '−') + Math.abs(v).toFixed(d) + ' pp',
+  int: v => v == null ? 'n/a' : Math.round(v).toLocaleString('en-GB'),
+  big: m => m == null ? 'n/a' : m >= 1000 ? '€' + (m / 1000).toFixed(2) + 'bn' : '€' + Math.round(m) + 'm',
+  shortDate(iso) {
+    return new Date(iso + 'T12:00:00Z').toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: '2-digit', timeZone: 'UTC' });
+  },
+  stamp: ms => new Date(ms).toLocaleString('en-GB', { timeZone: CONFIG.tz, day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }),
+  clock: ms => new Date(ms).toLocaleTimeString('en-GB', { timeZone: CONFIG.tz })
+};
+
+/* ============================== 5. ANIM ================================= */
+const Anim = {
+  reduced: window.matchMedia('(prefers-reduced-motion: reduce)').matches,
+  count(el, to, format, from = null, dur = 900) {
+    if (!el) return;
+    if (to == null) { el.textContent = format(null); el.dataset.v = ''; return; }
+    const start = from != null ? from : (parseFloat(el.dataset.v) || 0);
+    el.dataset.v = to;
+    if (Anim.reduced) { el.textContent = format(to); return; }
+    const t0 = performance.now();
+    const step = now => {
+      const p = Math.min(1, (now - t0) / dur), e = 1 - Math.pow(1 - p, 3);
+      el.textContent = format(start + (to - start) * e);
+      if (p < 1) requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+  }
+};
+
+/* ============================== STATE =================================== */
+const State = {
+  period: '1Y',
+  scaleMetric: 'rev',
+  newsFilter: 'all',
+  news: { bam: null, heij: null },       // live headlines only
+  newsErr: { bam: null, heij: null },
+  newsAt: null,
+  snapshotAt: null,      // GitHub version: when the data file was written
+  series: { bam: null, heij: null, idx: null },  // live Yahoo data only
+  errors: { bam: null, heij: null, idx: null },
+  lastOk: null,       // time of last successful fetch
+  lastTry: null,
+  via: null,
+  firstPaint: true
+};
+const COS = ['bam', 'heij'];
+const has = k => !!State.series[k];
+
+/* ============================== 6. CHARTS =============================== */
+const Charts = (() => {
+  const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+  function alpha(color, a) {
+    const h = color.replace('#', '');
+    const n = parseInt(h.length === 3 ? h.split('').map(c => c + c).join('') : h, 16);
+    return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
+  }
+  const palette = () => ({ bam: css('--bam'), heij: css('--heij'), bench: css('--bench'), fg: css('--fg'), muted: css('--muted'), line: css('--line'), surface: css('--bg-2') });
+  const gradient = color => ctx => {
+    const { chart } = ctx, area = chart.chartArea;
+    if (!area) return 'transparent';
+    const g = chart.ctx.createLinearGradient(0, area.top, 0, area.bottom);
+    g.addColorStop(0, alpha(color(), 0.26)); g.addColorStop(1, alpha(color(), 0));
+    return g;
+  };
+  let main, gauge, donut, bench;
+  const sparks = {};
+
+  function baseDefaults() {
+    Chart.defaults.font.family = getComputedStyle(document.body).fontFamily;
+    Chart.defaults.color = palette().muted;
+    Chart.defaults.borderColor = palette().line;
+  }
+  function tooltip() {
+    const p = palette();
+    return { backgroundColor: p.surface, borderColor: p.line, borderWidth: 1, titleColor: p.fg, bodyColor: p.fg, padding: 10, cornerRadius: 8,
+      titleFont: { family: 'IBM Plex Mono', size: 11 }, bodyFont: { family: 'IBM Plex Mono', size: 12 }, usePointStyle: true, boxPadding: 4 };
+  }
+  const zeroGrid = { color: ctx => ctx.tick.value === 0 ? palette().muted : palette().line, lineWidth: ctx => ctx.tick.value === 0 ? 1 : 0.6 };
+
+  function createMain() {
+    const p = palette();
+    const line = (label, key, extra = {}) => ({ label, data: [], borderColor: p[key], borderWidth: 2.2, tension: 0.2, pointRadius: 0, pointHoverRadius: 4, spanGaps: true, ...extra });
+    main = new Chart(document.getElementById('main-chart'), {
+      type: 'line',
+      data: { labels: [], datasets: [
+        line('BAM', 'bam', { fill: true, backgroundColor: gradient(() => palette().bam) }),
+        line('Heijmans', 'heij', { fill: true, backgroundColor: gradient(() => palette().heij) }),
+        line(CONFIG.idxName, 'bench', { borderDash: [4, 4], borderWidth: 1.4, fill: false })
+      ]},
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        animation: { duration: Anim.reduced ? 0 : 750, easing: 'easeOutQuart' },
+        interaction: { mode: 'index', intersect: false },
+        plugins: { legend: { display: false }, tooltip: { ...tooltip(), callbacks: { label: c => ` ${c.dataset.label}  ${Fmt.pct(c.parsed.y)}` } } },
+        scales: {
+          x: { grid: { display: false }, ticks: { maxTicksLimit: 5, maxRotation: 0, autoSkip: true, autoSkipPadding: 24, font: { family: 'IBM Plex Mono', size: 11 } } },
+          y: { position: 'right', grid: zeroGrid, border: { display: false }, ticks: { callback: v => (v > 0 ? '+' : '') + v + '%', font: { family: 'IBM Plex Mono', size: 11 }, maxTicksLimit: 6 } }
+        }
+      }
+    });
+  }
+  function createSpark(co) {
+    const el = document.getElementById('spark-' + co);
+    if (!el) return null;
+    if (sparks[co]) sparks[co].destroy();
+    const p = palette();
+    sparks[co] = new Chart(el, {
+      type: 'line',
+      data: { labels: [], datasets: [{ data: [], borderColor: p[co], borderWidth: 1.8, tension: 0.3, fill: true, backgroundColor: gradient(() => palette()[co]),
+        pointRadius: ctx => ctx.dataIndex === ctx.dataset.data.length - 1 ? 3 : 0, pointBackgroundColor: p[co] }] },
+      options: { responsive: true, maintainAspectRatio: false, animation: { duration: Anim.reduced ? 0 : 600 },
+        plugins: { legend: { display: false }, tooltip: { enabled: false } }, scales: { x: { display: false }, y: { display: false } } }
+    });
+    return sparks[co];
+  }
+  function createGauge() {
+    const p = palette();
+    gauge = new Chart(document.getElementById('gauge-chart'), {
+      type: 'doughnut',
+      data: { labels: ['Heijmans', 'BAM'], datasets: [{ data: [50, 50], backgroundColor: [p.heij, p.bam], borderWidth: 0, borderRadius: 4, spacing: 3 }] },
+      options: { responsive: true, maintainAspectRatio: false, rotation: -90, circumference: 180, cutout: '74%',
+        animation: { duration: Anim.reduced ? 0 : 900 }, plugins: { legend: { display: false }, tooltip: { enabled: false } } }
+    });
+  }
+  function createDonut() {
+    const p = palette();
+    donut = new Chart(document.getElementById('donut-chart'), {
+      type: 'doughnut',
+      data: { labels: ['BAM', 'Heijmans'], datasets: [{ data: [1, 1], backgroundColor: [p.bam, p.heij], borderWidth: 0, borderRadius: 5, spacing: 3, hoverOffset: 6 }] },
+      options: { responsive: true, maintainAspectRatio: false, cutout: '70%', animation: { duration: Anim.reduced ? 0 : 800 },
+        plugins: { legend: { display: false }, tooltip: { ...tooltip(), callbacks: { label: c => {
+          const tot = c.dataset.data.reduce((s, x) => s + x, 0);
+          return ` ${c.label}  ${Fmt.big(c.parsed)}  (${(c.parsed / tot * 100).toFixed(0)}%)`;
+        } } } } }
+    });
+  }
+  function createBench() {
+    const p = palette();
+    bench = new Chart(document.getElementById('bench-chart'), {
+      type: 'bar',
+      data: { labels: ['BAM', 'Heijmans', CONFIG.idxName], datasets: [{ data: [null, null, null], backgroundColor: [p.bam, p.heij, p.bench], borderRadius: 5, barThickness: 22 }] },
+      options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, animation: { duration: Anim.reduced ? 0 : 750 },
+        plugins: { legend: { display: false }, tooltip: { ...tooltip(), callbacks: { label: c => ' ' + Fmt.pct(c.parsed.x) } } },
+        scales: {
+          x: { grid: zeroGrid, border: { display: false }, ticks: { callback: v => (v > 0 ? '+' : '') + v + '%', font: { family: 'IBM Plex Mono', size: 11 }, maxTicksLimit: 5 } },
+          y: { grid: { display: false }, border: { display: false }, ticks: { color: p.fg, font: { family: 'IBM Plex Sans', size: 12, weight: 500 } } }
+        } }
+    });
+  }
+  function init() { baseDefaults(); createMain(); createGauge(); createDonut(); createBench(); }
+  function retheme() {
+    baseDefaults();
+    const p = palette();
+    main.data.datasets[0].borderColor = p.bam; main.data.datasets[1].borderColor = p.heij; main.data.datasets[2].borderColor = p.bench;
+    gauge.data.datasets[0].backgroundColor = [p.heij, p.bam];
+    donut.data.datasets[0].backgroundColor = [p.bam, p.heij];
+    bench.data.datasets[0].backgroundColor = [p.bam, p.heij, p.bench];
+    [main, donut, bench].forEach(c => { c.options.plugins.tooltip = { ...c.options.plugins.tooltip, ...tooltip() }; });
+    main.options.scales.x.ticks.color = p.muted; main.options.scales.y.ticks.color = p.muted;
+    bench.options.scales.x.ticks.color = p.muted; bench.options.scales.y.ticks.color = p.fg;
+    [main, gauge, donut, bench].forEach(c => c.update('none'));
+  }
+  return { init, retheme, createSpark, get main() { return main; }, get gauge() { return gauge; }, get donut() { return donut; }, get bench() { return bench; } };
+})();
+
+/* ============================== 7. RENDER =============================== */
+const Render = (() => {
+  const $ = id => document.getElementById(id);
+
+  // Align the three live series on one date axis (union of trading days)
+  function aligned() {
+    const set = new Set();
+    ['bam', 'heij', 'idx'].forEach(k => has(k) && State.series[k].dates.forEach(d => set.add(d)));
+    const dates = [...set].sort(), out = { dates };
+    ['bam', 'heij', 'idx'].forEach(k => {
+      if (!has(k)) { out[k] = dates.map(() => null); return; }
+      const m = new Map(State.series[k].dates.map((d, i) => [d, State.series[k].closes[i]]));
+      out[k] = dates.map(d => (m.has(d) ? m.get(d) : null));
+    });
+    return out;
+  }
+
+  function metrics() {
+    if (!has('bam') && !has('heij')) return null;
+    const A = aligned(), months = CONFIG.periods[State.period];
+    // Start = last trading day on or before the same date N months ago
+    const end = new Date(A.dates[A.dates.length - 1] + 'T12:00:00Z');
+    end.setUTCMonth(end.getUTCMonth() - months);
+    const startIso = end.toISOString().slice(0, 10);
+    let from = 0;
+    for (let i = A.dates.length - 1; i >= 0; i--) if (A.dates[i] <= startIso) { from = i; break; }
+    const w = { dates: A.dates.slice(from) };
+    ['bam', 'heij', 'idx'].forEach(k => (w[k] = A[k].slice(from)));
+    const ret = {}, vol = {}, trend = {};
+    ['bam', 'heij', 'idx'].forEach(k => (ret[k] = has(k) ? Analytics.totalReturn(w[k]) : null));
+    COS.forEach(k => {
+      vol[k] = has(k) ? Analytics.volatility(w[k]) : null;
+      trend[k] = has(k) ? Analytics.trend(State.series[k].closes) : null;
+    });
+    const both = ret.bam != null && ret.heij != null;
+    const rel = both ? ret.bam - ret.heij : null;
+    return { w, ret, vol, trend, rel, both, best: both ? (rel >= 0 ? 'bam' : 'heij') : null };
+  }
+  const mcap = co => { const q = Analytics.quote(State.series[co]); return q ? q.price * CONFIG.shares[co] / 1e6 : null; };
+
+  // ---------- quote cards ----------
+  function quoteCard(co) {
+    const c = CONFIG.companies[co], el = $('q-' + co), q = Analytics.quote(State.series[co]);
+    const head = `
+      <div class="quote-top">
+        <button class="co-btn" type="button" data-profile="${co}" aria-label="Open ${c.name} profile">
+          <span class="co-mark">${c.mark}</span>
+          <span><span class="co-name">${c.name} <i class="fa-solid fa-circle-info"></i></span>
+          <span class="co-tick">${c.ticker} · EUR</span></span>
+        </button>
+        <div class="quote-time">${q && q.time ? 'Yahoo Finance<br>' + Fmt.stamp(q.time) : ''}</div>
+      </div>`;
+    if (!q) {
+      const err = State.errors[co];
+      el.innerHTML = head + `<div class="unavail" data-skel><i class="fa-solid fa-plug-circle-xmark"></i><div><strong>Data unavailable</strong><span>${err ? err : 'Waiting for Yahoo Finance.'}</span></div></div>`;
+      return;
+    }
+    const up = q.chg == null || q.chg >= 0;
+    el.innerHTML = head + `
+      <div class="price-row">
+        <div class="price" data-skel><span id="px-${co}">${Fmt.eur(q.price)}</span></div>
+        <span class="chg ${q.chg == null ? '' : up ? 'up' : 'down'}" data-skel>
+          <i class="fa-solid ${up ? 'fa-caret-up' : 'fa-caret-down'}"></i><span id="chg-${co}">${Fmt.pct(q.chg, 2)}</span>
+        </span>
+      </div>
+      <div class="spark"><canvas id="spark-${co}" aria-label="${c.short} one-month price path"></canvas></div>
+      <div class="facts">
+        <div class="fact"><div class="label">Market cap</div><div class="v" data-skel title="Estimate: live price × ${(CONFIG.shares[co] / 1e6).toFixed(1)}m shares">${Fmt.big(q.price * CONFIG.shares[co] / 1e6)}</div></div>
+        <div class="fact"><div class="label">Volume</div><div class="v" data-skel>${Fmt.int(q.volume)}</div></div>
+        <div class="fact"><div class="label">Day range</div><div class="v" data-skel>${q.dayLow != null && q.dayHigh != null ? Fmt.eur(q.dayLow) + '–' + Fmt.eur(q.dayHigh).slice(1) : 'n/a'}</div></div>
+        <div class="fact"><div class="label">52-week range</div><div class="v" data-skel>${Fmt.eur(q.lo52)}–${Fmt.eur(q.hi52).slice(1)}</div></div>
+      </div>`;
+    const s = Charts.createSpark(co), last = State.series[co].closes.slice(-22);
+    s.data.labels = last.map((_, i) => i); s.data.datasets[0].data = last; s.update();
+  }
+  function animateQuotes() {
+    COS.forEach(co => {
+      const q = Analytics.quote(State.series[co]);
+      if (!q) return;
+      Anim.count($('px-' + co), q.price, v => Fmt.eur(v), q.price * 0.92);
+      Anim.count($('chg-' + co), q.chg, v => Fmt.pct(v, 2), 0);
+    });
+  }
+
+  // ---------- main chart ----------
+  function mainChart(m) {
+    const ch = Charts.main;
+    $('chart-empty').hidden = !!m;
+    if (!m) {
+      ch.data.labels = []; ch.data.datasets.forEach(d => (d.data = [])); ch.update();
+      ['lg-bam', 'lg-heij', 'lg-idx'].forEach(id => ($(id).textContent = 'n/a'));
+      return;
+    }
+    ch.data.labels = m.w.dates.map(Fmt.shortDate);
+    ch.data.datasets[0].data = Analytics.rebase(m.w.bam);
+    ch.data.datasets[1].data = Analytics.rebase(m.w.heij);
+    ch.data.datasets[2].data = Analytics.rebase(m.w.idx);
+    ch.update();
+    Anim.count($('lg-bam'), m.ret.bam, v => Fmt.pct(v));
+    Anim.count($('lg-heij'), m.ret.heij, v => Fmt.pct(v));
+    Anim.count($('lg-idx'), m.ret.idx, v => Fmt.pct(v));
+    $('lg-bam').className = 'legend-val ' + (m.ret.bam == null ? '' : m.ret.bam >= 0 ? 'c-pos' : 'c-neg');
+    $('lg-heij').className = 'legend-val ' + (m.ret.heij == null ? '' : m.ret.heij >= 0 ? 'c-pos' : 'c-neg');
+  }
+
+  // ---------- analytics tiles ----------
+  function tiles(m) {
+    const pn = CONFIG.periodNames[State.period], na = '<div class="note">Data unavailable</div>';
+    Anim.count($('t-rel'), m && m.rel, v => Fmt.pp(v));
+    $('t-rel').className = 'big ' + (m && m.best ? 'c-' + m.best : '');
+    $('t-rel-note').textContent = m && m.both ? `BAM minus Heijmans over ${pn}` : 'Needs live data for both companies';
+
+    if (!m) { ['t-ret', 't-vol', 't-trend'].forEach(id => ($(id).innerHTML = na)); }
+    else {
+      const maxAbs = Math.max(Math.abs(m.ret.bam || 0), Math.abs(m.ret.heij || 0), 1);
+      $('t-ret').innerHTML = COS.map(co => `
+        <div><div class="pair-row"><span class="c-${co}">${CONFIG.companies[co].short}</span><span class="num ${m.ret[co] == null ? '' : m.ret[co] >= 0 ? 'c-pos' : 'c-neg'}">${Fmt.pct(m.ret[co])}</span></div>
+        <div class="bar"><i style="width:${(Math.abs(m.ret[co] || 0) / maxAbs * 100).toFixed(1)}%;background:var(--${co})"></i></div></div>`).join('');
+      $('t-vol').innerHTML = COS.map(co => {
+        if (m.vol[co] == null) return `<div class="pair-row"><span class="c-${co}">${CONFIG.companies[co].short}</span><span class="num">n/a</span></div>`;
+        const sc = Analytics.volScore(m.vol[co]);
+        return `<div><div class="pair-row"><span class="c-${co}">${CONFIG.companies[co].short}</span><span class="num">${m.vol[co].toFixed(0)}%</span></div>
+        <div class="bar"><i style="width:${sc.s * 10}%;background:var(--${sc.band === 'High' ? 'neg' : sc.band === 'Moderate' ? 'warn' : 'pos'})"></i></div>
+        <div class="note" style="margin-top:2px">Score ${sc.s}/10 · ${sc.band}</div></div>`;
+      }).join('');
+      $('t-trend').innerHTML = COS.map(co => {
+        const t = m.trend[co];
+        if (!t) return `<div class="pair-row"><span class="c-${co}">${CONFIG.companies[co].short}</span><span class="num">n/a</span></div>`;
+        return `<div class="pair-row"><span class="c-${co}">${CONFIG.companies[co].short}</span>
+          <span class="trend-pill ${t.cls}"><i class="fa-solid ${t.icon}"></i>${t.dir}</span></div>
+          <div class="note" style="margin-top:0">${Fmt.pct(t.vsMa50)} vs 50-day avg · 20d ${Fmt.pct(t.slope)}</div>`;
+      }).join('');
+    }
+    $('t-best').textContent = m && m.best ? CONFIG.companies[m.best].short : 'n/a';
+    $('t-best').className = 'big ' + (m && m.best ? 'c-' + m.best : '');
+    $('t-best-note').innerHTML = m && m.best ? `<i class="fa-solid fa-trophy"></i> ${Fmt.pct(m.ret[m.best])} over ${pn}` : 'Needs live data for both companies';
+  }
+
+  // ---------- executive summary + verdict ----------
+  function exec(m) {
+    $('verdict-period').textContent = CONFIG.periodNames[State.period];
+    if (!m || !m.both) {
+      $('exec-text').textContent = State.lastTry
+        ? 'Live market data could not be loaded from Yahoo Finance, so no price figures are shown. The dashboard retries every 60 seconds.'
+        : 'Connecting to Yahoo Finance for live BAM and Heijmans quotes.';
+      $('verdict-name').textContent = 'n/a'; $('verdict-name').className = 'verdict-name';
+      $('verdict-badge').hidden = true;
+      $('verdict-note').textContent = 'Needs live data for both companies.';
+      $('exec-meta').innerHTML = staticChips();
+      return;
+    }
+    const qb = Analytics.quote(State.series.bam), qh = Analytics.quote(State.series.heij), pn = CONFIG.periodNames[State.period];
+    const lead = CONFIG.companies[m.best].short, lag = CONFIG.companies[m.best === 'bam' ? 'heij' : 'bam'].short;
+    const move = (q, upWord, downWord) => q.chg == null ? 'has no prior close to compare' : `${q.chg >= 0 ? upWord : downWord} ${Math.abs(q.chg).toFixed(1)}%`;
+    $('exec-text').innerHTML =
+      `Over ${pn}, <b class="c-${m.best}">${lead}</b> outperformed ${lag} by <b>${Math.abs(m.rel).toFixed(1)} percentage points</b> (${Fmt.pct(m.ret.bam)} for BAM against ${Fmt.pct(m.ret.heij)} for Heijmans). ` +
+      `In the latest session BAM ${move(qb, 'gained', 'lost')} at ${Fmt.eur(qb.price)} while Heijmans ${move(qh, 'added', 'gave up')} at ${Fmt.eur(qh.price)}. ` +
+      `BAM is the larger group by revenue and order book, while Heijmans earns the higher margin (${CONFIG.fundamentals.heij.ebitdaMargin}% vs ${CONFIG.fundamentals.bam.ebitdaMargin}% EBITDA in H1 2026) at an estimated market value of ${Fmt.big(mcap('heij'))} against ${Fmt.big(mcap('bam'))} for BAM.`;
+    $('exec-meta').innerHTML = staticChips() + (m.vol.bam != null && m.vol.heij != null ? `<span class="chip"><i class="fa-solid fa-wave-square"></i>Vol. BAM ${m.vol.bam.toFixed(0)}% · Heijmans ${m.vol.heij.toFixed(0)}%</span>` : '');
+    $('verdict-name').textContent = CONFIG.companies[m.best].name;
+    $('verdict-name').className = 'verdict-name c-' + m.best;
+    $('verdict-badge').hidden = false;
+    $('verdict-badge').style.background = `var(--${m.best})`;
+    $('verdict-badge-text').textContent = `Leads by ${Math.abs(m.rel).toFixed(1)} pp`;
+    $('verdict-note').textContent = m.ret.idx != null
+      ? `${Fmt.pct(m.ret[m.best])} price return, ${Fmt.pp(m.ret[m.best] - m.ret.idx)} vs the ${CONFIG.idxName}.`
+      : `${Fmt.pct(m.ret[m.best])} price return.`;
+  }
+  const staticChips = () =>
+    `<span class="chip"><i class="fa-solid fa-calendar-day"></i>BAM trading update 5 Nov</span>` +
+    `<span class="chip"><i class="fa-solid fa-layer-group"></i>Combined order book ${Fmt.big(CONFIG.fundamentals.bam.orderBook + CONFIG.fundamentals.heij.orderBook)}</span>`;
+
+  // ---------- gauge, donut, benchmark ----------
+  function gauge(m) {
+    const ok = m && m.both;
+    const v = ok ? 50 + Math.max(-50, Math.min(50, m.rel / 60 * 50)) : 50;
+    Charts.gauge.data.datasets[0].data = [100 - v, v];
+    Charts.gauge.update();
+    Anim.count($('gauge-val'), ok ? m.rel : null, x => Fmt.pp(x, 1));
+    $('gauge-val').className = 'num ' + (ok ? 'c-' + m.best : '');
+    $('gauge-lbl').textContent = ok ? `${CONFIG.companies[m.best].short} ahead over ${CONFIG.periodNames[State.period]}` : 'Data unavailable';
+  }
+  function donut() {
+    const f = CONFIG.fundamentals;
+    let v, sub;
+    if (State.scaleMetric === 'rev') { v = [f.bam.revH1, f.heij.revH1]; sub = 'revenue H1 2026'; }
+    else if (State.scaleMetric === 'ob') { v = [f.bam.orderBook, f.heij.orderBook]; sub = 'order book'; }
+    else { v = [mcap('bam'), mcap('heij')]; sub = 'market cap (est., live price)'; }
+    if (v[0] == null || v[1] == null) {
+      Charts.donut.data.datasets[0].data = [1, 1]; Charts.donut.update();
+      $('donut-total').textContent = 'n/a'; $('donut-sub').textContent = 'Live prices unavailable';
+      return;
+    }
+    Charts.donut.data.datasets[0].data = v; Charts.donut.update();
+    const tot = v[0] + v[1];
+    Anim.count($('donut-total'), tot, x => Fmt.big(x));
+    $('donut-sub').innerHTML = `${sub}<br><span class="c-bam">BAM ${(v[0] / tot * 100).toFixed(0)}%</span> · <span class="c-heij">HEI ${(v[1] / tot * 100).toFixed(0)}%</span>`;
+  }
+  function bench(m) {
+    Charts.bench.data.datasets[0].data = m ? [m.ret.bam, m.ret.heij, m.ret.idx] : [null, null, null];
+    Charts.bench.update();
+    $('bench-sub').textContent = m ? `Price return vs ${CONFIG.idxName} index, ${CONFIG.periodNames[State.period]}` : 'Data unavailable';
+  }
+
+  // ---------- insights (rule-based sentences from live + reported data) ----------
+  function insights(m) {
+    const pn = CONFIG.periodNames[State.period], f = CONFIG.fundamentals, list = [];
+    if (m && m.both) {
+      const lead = CONFIG.companies[m.best].short;
+      const calm = m.vol.bam != null && m.vol.heij != null ? (m.vol.bam < m.vol.heij ? 'BAM' : 'Heijmans') : null;
+      const idxTxt = m.ret.idx != null ? ` and ${m.ret[m.best] > m.ret.idx ? 'beats' : 'trails'} the ${CONFIG.idxName} by ${Math.abs(m.ret[m.best] - m.ret.idx).toFixed(1)} pp` : '';
+      list.push({ i: 'fa-ranking-star', h: `${lead} leads over ${pn}`, p: `${lead} is ahead by ${Math.abs(m.rel).toFixed(1)} pp${idxTxt}.${calm ? ` ${calm} has been the calmer stock over this period.` : ''}` });
+    }
+    const highs = COS.filter(has).map(co => {
+      const q = Analytics.quote(State.series[co]);
+      return `${CONFIG.companies[co].short} trades ${Math.abs((q.price / q.hi52 - 1) * 100).toFixed(0)}% below its 52-week high of ${Fmt.eur(q.hi52)}`;
+    });
+    if (highs.length) list.push({ i: 'fa-mountain', h: 'Distance from 52-week highs', p: highs.join('; ') + '.' });
+    const mb = mcap('bam'), mh = mcap('heij');
+    list.push({ i: 'fa-percent', h: 'Margin gap is the valuation story',
+      p: `Heijmans converts revenue at a ${f.heij.ebitdaMargin}% EBITDA margin versus ${f.bam.ebitdaMargin}% at BAM` +
+         (mb && mh ? `, which helps explain why a company with less than half of BAM's H1 revenue is valued at about ${Math.round(mh / mb * 100)}% of BAM's market cap.` : '.') });
+    list.push({ i: 'fa-layer-group', h: 'Order books support both outlooks',
+      p: `BAM's €12.6bn book is about ${(f.bam.orderBook / (f.bam.revH1 * 2)).toFixed(1)} years of revenue; Heijmans' €4.1bn book is about ${(f.heij.orderBook / 3100).toFixed(1)} years against its €3.1bn 2026 outlook.` });
+    list.push({ i: 'fa-calendar-check', h: 'Next catalyst: BAM trading update, 5 November',
+      p: 'Investors will look for confirmation of the at least 6.5% margin guidance and for cash conversion to follow profit, after a €40m buyback completed in July.' });
+    list.push({ i: 'fa-city', h: 'Sector backdrop',
+      p: 'Dutch demand is supported by housing shortages, grid and energy transition work, infrastructure maintenance and defence construction. Both groups cite these drivers in their 2026 guidance.' });
+    $('insights').innerHTML = list.map(x => `<li class="insight"><span class="insight-ico"><i class="fa-solid ${x.i}"></i></span><div><h3>${x.h}</h3><p>${x.p}</p></div></li>`).join('');
+  }
+
+  // Escape text from outside feeds before it goes into the page
+  const esc = t => String(t).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  function newsDate(ms) {
+    const d = new Date(ms), today = Live.amsDate(Date.now()) === Live.amsDate(ms);
+    return today ? 'Today ' + d.toLocaleTimeString('en-GB', { timeZone: CONFIG.tz, hour: '2-digit', minute: '2-digit' })
+                 : d.toLocaleDateString('en-GB', { timeZone: CONFIG.tz, day: 'numeric', month: 'short' });
+  }
+  function news() {
+    const grid = $('news-grid'), f = State.newsFilter;
+    const cos = f === 'all' ? COS : [f];
+    $('news-sub').textContent = State.newsAt
+      ? `Live headlines from Google News · updated ${State.snapshotAt ? Fmt.stamp(State.newsAt) : Fmt.clock(State.newsAt)}`
+      : 'Live headlines from Google News';
+    const loaded = cos.filter(co => State.news[co]);
+    if (!loaded.length) {
+      const errs = cos.map(co => State.newsErr[co]).filter(Boolean);
+      grid.innerHTML = `<div class="unavail" style="grid-column:1/-1"><i class="fa-solid fa-plug-circle-xmark"></i><div><strong>${errs.length ? 'News unavailable' : 'Loading news'}</strong><span>${errs.length ? esc(errs[0]) : 'Fetching the latest headlines.'}</span></div></div>`;
+      return;
+    }
+    const items = loaded.flatMap(co => State.news[co]).sort((a, b) => b.time - a.time).slice(0, f === 'all' ? 10 : 8);
+    if (!items.length) { grid.innerHTML = '<div class="unavail" style="grid-column:1/-1"><i class="fa-regular fa-newspaper"></i><div><strong>No recent headlines</strong><span>Nothing found in the last 60 days.</span></div></div>'; return; }
+    grid.innerHTML = items.map(n => {
+      const tag = n.link ? 'a' : 'div', href = n.link ? ` href="${esc(n.link)}" target="_blank" rel="noopener"` : '';
+      return `<${tag} class="news ${n.co}"${href}>
+        <div class="news-meta"><span class="tag">${CONFIG.companies[n.co].short}</span><span class="news-date">${newsDate(n.time)}</span></div>
+        <h3>${esc(n.title)}</h3>
+        <span class="news-src">${n.link ? '<i class="fa-solid fa-arrow-up-right-from-square"></i>' : ''}${esc(n.source || 'Google News')}</span>
+      </${tag}>`;
+    }).join('');
+  }
+
+  // ---------- data status line + banner ----------
+  function status() {
+    const any = has('bam') || has('heij');
+    const failed = ['bam', 'heij', 'idx'].filter(k => State.errors[k]);
+    let txt;
+    if (!State.lastTry) txt = 'Connecting to Yahoo Finance';
+    else if (!any) txt = 'Live data unavailable';
+    else if (State.snapshotAt) {
+      const hours = (Date.now() - State.snapshotAt) / 36e5;
+      txt = `Yahoo Finance · data from ${Fmt.stamp(State.snapshotAt)}` + (hours > 3 ? ' · older than 3 hours' : '');
+    }
+    else txt = `Yahoo Finance via ${State.via} · updated ${Fmt.clock(State.lastOk)}` + (failed.length ? ` · last refresh failed ${Fmt.clock(State.lastTry)}` : '');
+    $('data-status').textContent = txt;
+    $('data-status').className = 'data-status ' + (any ? 'ok' : State.lastTry ? 'bad' : '');
+    const banner = $('data-banner');
+    banner.hidden = !(State.lastTry && !any);
+    if (!banner.hidden) {
+      const framed = (() => { try { return window.self !== window.top; } catch (e) { return true; } })();
+      $('banner-text').textContent = Snapshot.required
+        ? `No market data yet (${State.errors.bam || 'data file missing'}). In your GitHub repository, open the Actions tab and run the "Update data" workflow; the page picks up the data within a minute.`
+        : framed
+        ? 'This page is running inside a viewer that blocks outside requests, so Yahoo Finance cannot be reached. Download the HTML file and open it directly in a browser to load live prices.'
+        : Live.isLocal()
+          ? `server.py is running but could not fetch from Yahoo Finance (${State.errors.bam || State.errors.heij || 'unknown error'}). Check the internet connection; the dashboard retries every 60 seconds.`
+          : `Yahoo Finance could not be reached (${State.errors.bam || State.errors.heij || 'unknown error'}). Start the dashboard with server.py (or the start file) instead of "python3 -m http.server" and reload.`;
+    }
+  }
+
+  function all() {
+    const m = metrics();
+    COS.forEach(quoteCard);
+    mainChart(m); tiles(m); exec(m); gauge(m); donut(); bench(m); insights(m); status();
+  }
+  return { all, animateQuotes, donut, news, status };
+})();
+
+/* ============================== 8. UI =================================== */
+const UI = (() => {
+  function amsParts() {
+    const parts = new Intl.DateTimeFormat('en-GB', { timeZone: CONFIG.tz, weekday: 'short', hour: '2-digit', minute: '2-digit', hour12: false }).formatToParts(new Date());
+    const get = t => parts.find(p => p.type === t).value;
+    return { wd: get('weekday'), mins: parseInt(get('hour'), 10) * 60 + parseInt(get('minute'), 10) };
+  }
+  function marketOpen() { const { wd, mins } = amsParts(); return !['Sat', 'Sun'].includes(wd) && mins >= 540 && mins < 1050; }
+  function tickClock() {
+    const now = new Date();
+    document.getElementById('clock-time').textContent = now.toLocaleTimeString('en-GB', { timeZone: CONFIG.tz });
+    document.getElementById('clock-date').textContent = now.toLocaleDateString('en-GB', { timeZone: CONFIG.tz, weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }) + ' · Amsterdam';
+    const open = marketOpen();
+    document.getElementById('mkt-status').classList.toggle('open', open);
+    document.getElementById('mkt-text').textContent = open ? 'Euronext open' : 'Euronext closed';
+  }
+
+  // ---- Data loading: full 5-year history first, then 5-day refreshes
+  let remaining = CONFIG.refreshSeconds, busy = false;
+  const ring = document.getElementById('ring'), C = 2 * Math.PI * 7.5;
+  ring.style.strokeDasharray = C;
+  function paintRing() {
+    ring.style.strokeDashoffset = C * (1 - remaining / CONFIG.refreshSeconds);
+    document.getElementById('refresh-label').textContent = busy ? '...' : remaining + 's';
+  }
+  function applySnapshot(snap) {
+    const keys = ['bam', 'heij', 'idx'], errs = snap.errors || {};
+    keys.forEach(k => {
+      const c = snap.charts[k];
+      if (c) { try { State.series[k] = { ...Live.parse(c), via: 'GitHub data file' }; } catch (e) { State.series[k] = null; } }
+      State.errors[k] = errs[k] || (State.series[k] ? null : 'not in the data file yet');
+    });
+    COS.forEach(co => {
+      const items = Snapshot.cleanNews(snap.news && snap.news[co], co);
+      State.news[co] = items;
+      State.newsErr[co] = items ? null : ((snap.newsErrors && snap.newsErrors[co]) || 'not in the data file yet');
+    });
+    State.snapshotAt = Date.parse(snap.updated) || null;
+    State.lastOk = State.snapshotAt;
+    State.newsAt = Date.parse(snap.newsUpdated || snap.updated) || null;
+    State.via = 'GitHub data file';
+  }
+
+  async function load() {
+    if (busy) return;
+    busy = true; paintRing();
+    if (Snapshot.enabled) {
+      const snap = await Snapshot.load();
+      if (snap || Snapshot.required) {
+        State.lastTry = Date.now();
+        if (snap) applySnapshot(snap);
+        else ['bam', 'heij', 'idx'].forEach(k => { if (!State.series[k]) State.errors[k] = 'data/data.json not found'; });
+        Render.all(); Render.news();
+        busy = false; remaining = CONFIG.refreshSeconds; paintRing();
+        return;
+      }
+    }
+    const keys = ['bam', 'heij', 'idx'];
+    const wait = ms => new Promise(r => setTimeout(r, ms));
+    const fetchOne = async k => {
+      const range = State.series[k] ? '5d' : '5y';
+      try { return { status: 'fulfilled', value: await Live.chart(CONFIG.symbols[k], range) }; }
+      catch (e1) {
+        if (Live.isLocal()) return { status: 'rejected', reason: e1 };
+        await wait(1500);
+        try { return { status: 'fulfilled', value: await Live.chart(CONFIG.symbols[k], range) }; }
+        catch (e2) { return { status: 'rejected', reason: e2 }; }
+      }
+    };
+    let results;
+    // First call also finds out whether server.py is running
+    const first = await fetchOne(keys[0]);
+    if (Live.isLocal()) {
+      // Own server: no rate limits, so fetch the rest in parallel
+      results = [first, ...await Promise.all(keys.slice(1).map(fetchOne))];
+    } else {
+      // Public proxies reject bursts: one at a time with a short pause
+      results = [first];
+      for (const k of keys.slice(1)) { await wait(600); results.push(await fetchOne(k)); }
+    }
+    State.lastTry = Date.now();
+    results.forEach((r, i) => {
+      const k = keys[i];
+      if (r.status === 'fulfilled') {
+        State.series[k] = State.series[k] ? Live.merge(State.series[k], r.value) : r.value;
+        State.errors[k] = null; State.lastOk = Date.now(); State.via = r.value.via;
+      } else {
+        State.errors[k] = r.reason && r.reason.message ? r.reason.message : 'Request failed';
+        // On a failed refresh, already loaded live data stays; it is never replaced by other numbers
+      }
+    });
+    Render.all();
+    loadNews();   // runs in the background; prices show without waiting for it
+    busy = false; remaining = CONFIG.refreshSeconds; paintRing();
+  }
+
+  // Headlines change slowly: fetch them at most every 10 minutes
+  let newsBusy = false;
+  async function loadNews() {
+    if (newsBusy || (State.newsAt && Date.now() - State.newsAt < CONFIG.newsEveryMs)) return;
+    newsBusy = true;
+    const one = async co => {
+      try { State.news[co] = await News.load(co); State.newsErr[co] = null; }
+      catch (e) { State.newsErr[co] = e && e.message ? e.message : 'Request failed'; }
+    };
+    if (Live.isLocal()) await Promise.all(COS.map(one));
+    else for (const co of COS) { await new Promise(r => setTimeout(r, 600)); await one(co); }
+    if (State.news.bam || State.news.heij) State.newsAt = Date.now();
+    Render.news();
+    newsBusy = false;
+  }
+
+  function setTheme(light) {
+    const root = document.documentElement;
+    if (light) root.setAttribute('data-theme', 'light'); else root.removeAttribute('data-theme');
+    const btn = document.getElementById('theme-btn');
+    btn.innerHTML = light ? '<i class="fa-solid fa-moon"></i><span>Dark</span>' : '<i class="fa-solid fa-sun"></i><span>Light</span>';
+    btn.setAttribute('aria-label', light ? 'Switch to dark mode' : 'Switch to light mode');
+    try { localStorage.setItem('bh-theme', light ? 'light' : 'dark'); } catch (e) {}
+    Charts.retheme(); Render.all();
+  }
+
+  let lastFocus = null;
+  function openProfile(co) {
+    const c = CONFIG.companies[co], q = Analytics.quote(State.series[co]);
+    lastFocus = document.activeElement;
+    document.getElementById('modal-root').innerHTML = `
+      <div class="modal-backdrop" id="mb">
+        <div class="panel modal quote ${co}" role="dialog" aria-modal="true" aria-labelledby="m-title">
+          <div class="modal-head">
+            <div style="display:flex;gap:10px;align-items:center">
+              <span class="co-mark">${c.mark}</span>
+              <div><h2 class="panel-title" id="m-title">${c.name}</h2><div class="co-tick">${c.ticker} · ${q ? Fmt.eur(q.price) + ' live' : 'price unavailable'}</div></div>
+            </div>
+            <button class="x-btn" id="m-close" type="button" aria-label="Close"><i class="fa-solid fa-xmark"></i></button>
+          </div>
+          <p class="lede">${c.lede}</p>
+          <dl>${c.facts.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('')}</dl>
+        </div>
+      </div>`;
+    const close = () => { document.getElementById('modal-root').innerHTML = ''; document.removeEventListener('keydown', esc); lastFocus && lastFocus.focus(); };
+    const esc = e => { if (e.key === 'Escape') close(); };
+    document.addEventListener('keydown', esc);
+    document.getElementById('m-close').onclick = close;
+    document.getElementById('mb').onclick = e => { if (e.target.id === 'mb') close(); };
+    document.getElementById('m-close').focus();
+  }
+
+  function background() {
+    const cv = document.getElementById('bg-canvas'), ctx = cv.getContext('2d');
+    let w, h, t = 0, raf;
+    const blobs = [
+      { c: '--bam', x: 0.15, y: 0.2, r: 0.45, sx: 0.00011, sy: 0.00008 },
+      { c: '--heij', x: 0.85, y: 0.35, r: 0.4, sx: -0.00009, sy: 0.0001 },
+      { c: '--bam', x: 0.6, y: 0.9, r: 0.35, sx: 0.00007, sy: -0.00006 }
+    ];
+    const size = () => { const d = Math.min(devicePixelRatio || 1, 2); w = cv.width = innerWidth * d; h = cv.height = innerHeight * d; };
+    const col = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+    function frame() {
+      ctx.clearRect(0, 0, w, h);
+      const light = document.documentElement.dataset.theme === 'light';
+      blobs.forEach((b, i) => {
+        const x = (b.x + Math.sin(t * b.sx * 60 + i) * 0.06) * w, y = (b.y + Math.cos(t * b.sy * 60 + i) * 0.06) * h;
+        const g = ctx.createRadialGradient(x, y, 0, x, y, b.r * Math.max(w, h)), hex = col(b.c);
+        g.addColorStop(0, hex + (light ? '1A' : '22')); g.addColorStop(1, hex + '00');
+        ctx.fillStyle = g; ctx.fillRect(0, 0, w, h);
+      });
+      ctx.strokeStyle = col('--line'); ctx.lineWidth = 1; ctx.globalAlpha = 0.35;
+      const step = 64 * (devicePixelRatio || 1);
+      ctx.beginPath();
+      for (let gx = (t * 0.15) % step; gx < w; gx += step) { ctx.moveTo(gx, 0); ctx.lineTo(gx, h); }
+      for (let gy = 0; gy < h; gy += step) { ctx.moveTo(0, gy); ctx.lineTo(w, gy); }
+      ctx.stroke(); ctx.globalAlpha = 1; t += 1;
+      if (!Anim.reduced) raf = requestAnimationFrame(frame);
+    }
+    size(); addEventListener('resize', () => { size(); if (Anim.reduced) frame(); });
+    document.addEventListener('visibilitychange', () => { if (document.hidden) cancelAnimationFrame(raf); else if (!Anim.reduced) raf = requestAnimationFrame(frame); });
+    frame();
+  }
+
+  function wire() {
+    const seg = (id, attr, fn) => document.getElementById(id).addEventListener('click', e => {
+      const b = e.target.closest(`button[${attr}]`); if (!b) return;
+      document.querySelectorAll(`#${id} button`).forEach(x => x.setAttribute('aria-pressed', x === b));
+      fn(b.getAttribute(attr));
+    });
+    seg('period-seg', 'data-p', v => { State.period = v; Render.all(); });
+    seg('scale-seg', 'data-m', v => { State.scaleMetric = v; Render.donut(); });
+    seg('news-seg', 'data-f', v => { State.newsFilter = v; Render.news(); });
+    document.getElementById('theme-btn').addEventListener('click', () => setTheme(document.documentElement.dataset.theme !== 'light'));
+    document.getElementById('refresh-btn').addEventListener('click', load);
+    document.querySelector('.quotes').addEventListener('click', e => { const b = e.target.closest('[data-profile]'); if (b) openProfile(b.dataset.profile); });
+
+    // PDF export via the browser's print-to-PDF; embedded viewers block it
+    const pdf = document.getElementById('pdf-btn');
+    let framed = true; try { framed = window.self !== window.top; } catch (e) {}
+    pdf.hidden = framed;
+    pdf.addEventListener('click', () => window.print());
+
+    setInterval(tickClock, 1000); tickClock();
+    setInterval(() => { if (busy) return; remaining--; if (remaining <= 0) load(); else paintRing(); }, 1000);
+    paintRing();
+  }
+  return { wire, background, setTheme, load };
+})();
+
+/* ============================== 9. BOOT ================================= */
+(async function boot() {
+  document.documentElement.classList.add('is-loading');
+  let savedLight = false;
+  try { savedLight = localStorage.getItem('bh-theme') === 'light'; } catch (e) {}
+  if (savedLight) document.documentElement.setAttribute('data-theme', 'light');
+
+  Charts.init();
+  UI.background();
+  UI.wire();
+  if (savedLight) UI.setTheme(true);
+  Render.all();      // empty "connecting" state, shown under skeletons
+  Render.news();
+
+  await UI.load();   // first live fetch (5 years of daily bars)
+  document.documentElement.classList.remove('is-loading');
+  Render.animateQuotes();
+})();
+</script>
