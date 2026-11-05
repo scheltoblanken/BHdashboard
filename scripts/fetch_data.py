@@ -28,9 +28,19 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT = os.path.join(ROOT, "data", "data.json")
 
 SYMBOLS = {"bam": "BAMNB.AS", "heij": "HEIJM.AS", "idx": "^AEX"}
+# Several searches per company, merged. "BAM" is a short name, so one strict
+# search finds little; headlines must still contain "BAM" in capitals.
 NEWS = {
-    "bam": ('"Koninklijke BAM" OR "BAM Groep" OR "bouwer BAM" OR "bouwbedrijf BAM"', re.compile(r"\bBAM\b")),
-    "heij": ("Heijmans", re.compile(r"Heijmans", re.I)),
+    "bam": ([
+        "BAM",
+        '"Koninklijke BAM"',
+        "BAM bouwbedrijf",
+        "BAM bouwer",
+        "BAM Infra",
+        "BAM Wonen",
+        "BAM aandeel",
+    ], re.compile(r"\bBAM\b")),
+    "heij": (["Heijmans"], re.compile(r"Heijmans", re.I)),
 }
 NEWS_MAX_AGE_DAYS = 60
 META_KEYS = [
@@ -101,12 +111,27 @@ def yahoo_chart(symbol):
     raise RuntimeError(last or "no data")
 
 
-def google_news(query, pattern):
-    url = "https://news.google.com/rss/search?" + urllib.parse.urlencode(
-        {"q": query, "hl": "nl", "gl": "NL", "ceid": "NL:nl"})
-    root = ET.fromstring(get(url))
+def google_news(queries, pattern):
     cutoff = time.time() - NEWS_MAX_AGE_DAYS * 86400
-    seen, items = set(), []
+    seen, items, fetched = set(), [], 0
+    for query in queries:
+        url = "https://news.google.com/rss/search?" + urllib.parse.urlencode(
+            {"q": query + " when:60d", "hl": "nl", "gl": "NL", "ceid": "NL:nl"})
+        try:
+            root = ET.fromstring(get(url))
+            fetched += 1
+        except Exception as e:
+            print(f"news query {query!r}: {e}", file=sys.stderr)
+            continue
+        time.sleep(0.5)
+        collect(root, pattern, cutoff, seen, items)
+    if not fetched:
+        raise RuntimeError("all news searches failed")
+    items.sort(key=lambda n: n["time"], reverse=True)
+    return items[:8]
+
+
+def collect(root, pattern, cutoff, seen, items):
     for it in root.iter("item"):
         title = (it.findtext("title") or "").strip()
         source = (it.findtext("source") or "").strip()
@@ -123,8 +148,6 @@ def google_news(query, pattern):
         seen.add(key)
         items.append({"title": title, "source": source, "time": int(ts * 1000),
                       "link": link if link.startswith("https://") else None})
-    items.sort(key=lambda n: n["time"], reverse=True)
-    return items[:8]
 
 
 def main():
@@ -149,9 +172,9 @@ def main():
         time.sleep(1)
 
     got_news = False
-    for key, (query, pattern) in NEWS.items():
+    for key, (queries, pattern) in NEWS.items():
         try:
-            data["news"][key] = google_news(query, pattern)
+            data["news"][key] = google_news(queries, pattern)
             got_news = True
         except Exception as e:
             data["newsErrors"][key] = f"Google News failed at {now}: {type(e).__name__}"
